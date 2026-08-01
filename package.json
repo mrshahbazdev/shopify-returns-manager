@@ -1,6 +1,7 @@
 {
-  "name": "app",
+  "name": "shopify-returns-manager",
   "private": true,
+  "description": "Shopify app for returns, exchanges and store credit management.",
   "scripts": {
     "build": "remix vite:build",
     "dev": "shopify app dev",

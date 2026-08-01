@@ -9,8 +9,8 @@ generator client {
 // enough when changing adapters.
 // See https://www.prisma.io/docs/orm/reference/prisma-schema-reference#string for more information
 datasource db {
-  provider = "sqlite"
-  url      = "file:dev.sqlite"
+  provider = "mysql"
+  url      = env("DATABASE_URL")
 }
 
 model Session {
@@ -31,4 +31,118 @@ model Session {
   emailVerified       Boolean?  @default(false)
   refreshToken        String?
   refreshTokenExpires DateTime?
+}
+
+enum RequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  COMPLETED
+  CANCELLED
+}
+
+enum Resolution {
+  REFUND
+  EXCHANGE
+  STORE_CREDIT
+  REPAIR
+}
+
+model ShopSettings {
+  id                 String   @id @default(cuid())
+  shop               String   @unique
+  returnWindowDays   Int      @default(30)
+  allowExchanges     Boolean  @default(true)
+  allowStoreCredit   Boolean  @default(true)
+  allowPartialReturns Boolean @default(true)
+  refundMethod       String   @default("original") // original, store_credit
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+}
+
+model ReturnRequest {
+  id              String        @id @default(cuid())
+  shop            String
+  orderId         String
+  orderName       String
+  customerEmail   String?
+  customerName    String?
+  status          RequestStatus @default(PENDING)
+  resolution      Resolution    @default(REFUND)
+  reason          String
+  customerNote    String?
+  adminNote       String?
+  totalRefund     Decimal?      @default(0)
+  storeCreditIssued Decimal?    @default(0)
+  shopifyRefundId String?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  lineItems       ReturnLineItem[]
+}
+
+model ReturnLineItem {
+  id              String        @id @default(cuid())
+  returnRequestId String
+  returnRequest   ReturnRequest @relation(fields: [returnRequestId], references: [id], onDelete: Cascade)
+  lineItemId      String
+  productId       String?
+  variantId       String?
+  title           String
+  quantity        Int
+  price           Decimal
+  reason          String?
+  requestedAction Resolution    @default(REFUND)
+}
+
+model ExchangeRequest {
+  id              String        @id @default(cuid())
+  shop            String
+  orderId         String
+  orderName       String
+  customerEmail   String?
+  customerName    String?
+  status          RequestStatus @default(PENDING)
+  reason          String
+  customerNote    String?
+  adminNote       String?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  lineItems       ExchangeLineItem[]
+}
+
+model ExchangeLineItem {
+  id                String           @id @default(cuid())
+  exchangeRequestId String
+  exchangeRequest   ExchangeRequest @relation(fields: [exchangeRequestId], references: [id], onDelete: Cascade)
+  originalLineItemId String
+  originalVariantId  String?
+  newVariantId       String
+  newTitle           String
+  quantity           Int
+  reason             String?
+}
+
+model StoreCredit {
+  id        String   @id @default(cuid())
+  shop      String
+  customerEmail String
+  balance   Decimal  @default(0)
+  totalIssued Decimal @default(0)
+  totalUsed   Decimal @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  transactions StoreCreditTransaction[]
+
+  @@unique([shop, customerEmail])
+}
+
+model StoreCreditTransaction {
+  id            String      @id @default(cuid())
+  storeCreditId String
+  storeCredit   StoreCredit @relation(fields: [storeCreditId], references: [id], onDelete: Cascade)
+  amount        Decimal
+  type          String      // issue, use, expire, adjust
+  description   String?
+  returnRequestId String?
+  createdAt     DateTime    @default(now())
 }
