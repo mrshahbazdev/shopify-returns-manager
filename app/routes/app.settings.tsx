@@ -1,6 +1,6 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
-import { useLoaderData, useSubmit, useRevalidator } from "@remix-run/react";
+import { useLoaderData, useSubmit } from "@remix-run/react";
 import {
   Page,
   Card,
@@ -11,6 +11,7 @@ import {
   Select,
   Button,
   InlineStack,
+  Banner,
 } from "@shopify/polaris";
 import { TitleBar } from "@shopify/app-bridge-react";
 import { useState, useCallback } from "react";
@@ -33,6 +34,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const allowStoreCredit = formData.get("allowStoreCredit") === "on";
   const allowPartialReturns = formData.get("allowPartialReturns") === "on";
   const refundMethod = formData.get("refundMethod") as string;
+  const restockingFeePercent = Number(formData.get("restockingFeePercent"));
+  const autoApproveThreshold = Number(formData.get("autoApproveThreshold"));
+  const returnReasons = formData.get("returnReasons") as string;
 
   const settings = await updateShopSettings(session.shop, {
     returnWindowDays,
@@ -40,6 +44,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     allowStoreCredit,
     allowPartialReturns,
     refundMethod,
+    restockingFeePercent,
+    autoApproveThreshold,
+    returnReasons,
   });
 
   return json({ settings: serializeObject(settings) });
@@ -48,13 +55,15 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 export default function SettingsPage() {
   const { settings, shop } = useLoaderData<typeof loader>();
   const submit = useSubmit();
-  const revalidator = useRevalidator();
 
   const [returnWindowDays, setReturnWindowDays] = useState(String(settings.returnWindowDays));
   const [allowExchanges, setAllowExchanges] = useState(settings.allowExchanges);
   const [allowStoreCredit, setAllowStoreCredit] = useState(settings.allowStoreCredit);
   const [allowPartialReturns, setAllowPartialReturns] = useState(settings.allowPartialReturns);
   const [refundMethod, setRefundMethod] = useState(settings.refundMethod);
+  const [restockingFeePercent, setRestockingFeePercent] = useState(String(settings.restockingFeePercent || 0));
+  const [autoApproveThreshold, setAutoApproveThreshold] = useState(String(settings.autoApproveThreshold || 0));
+  const [returnReasons, setReturnReasons] = useState(settings.returnReasons || "");
 
   const handleSave = useCallback(() => {
     submit(
@@ -64,11 +73,23 @@ export default function SettingsPage() {
         allowStoreCredit: allowStoreCredit ? "on" : "off",
         allowPartialReturns: allowPartialReturns ? "on" : "off",
         refundMethod,
+        restockingFeePercent,
+        autoApproveThreshold,
+        returnReasons,
       },
       { method: "POST" },
     );
-    revalidator.revalidate();
-  }, [returnWindowDays, allowExchanges, allowStoreCredit, allowPartialReturns, refundMethod, submit, revalidator]);
+  }, [
+    returnWindowDays,
+    allowExchanges,
+    allowStoreCredit,
+    allowPartialReturns,
+    refundMethod,
+    restockingFeePercent,
+    autoApproveThreshold,
+    returnReasons,
+    submit,
+  ]);
 
   return (
     <Page>
@@ -111,6 +132,30 @@ export default function SettingsPage() {
               value={refundMethod}
               onChange={setRefundMethod}
             />
+            <TextField
+              label="Restocking fee (%)"
+              value={restockingFeePercent}
+              onChange={setRestockingFeePercent}
+              autoComplete="off"
+              type="number"
+              helpText="Percentage deducted from refund value for restocking."
+            />
+            <TextField
+              label="Auto-approve threshold ($)"
+              value={autoApproveThreshold}
+              onChange={setAutoApproveThreshold}
+              autoComplete="off"
+              type="number"
+              helpText="Return requests with a total below this amount will be automatically approved. Set 0 to disable."
+            />
+            <TextField
+              label="Return reasons"
+              value={returnReasons}
+              onChange={setReturnReasons}
+              autoComplete="off"
+              multiline={3}
+              helpText="Comma-separated list of reasons shown to customers in the portal."
+            />
             <InlineStack align="end">
               <Button onClick={handleSave} variant="primary">
                 Save settings
@@ -127,9 +172,9 @@ export default function SettingsPage() {
             <Text as="p" variant="bodyMd" tone="subdued">
               Customers can submit returns and exchanges from this public page:
             </Text>
-            <Text as="p" variant="bodyMd">
+            <Banner tone="info">
               <code>{`/returns/${shop}`}</code>
-            </Text>
+            </Banner>
           </BlockStack>
         </Card>
       </BlockStack>

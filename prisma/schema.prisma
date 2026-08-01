@@ -49,15 +49,18 @@ enum Resolution {
 }
 
 model ShopSettings {
-  id                 String   @id @default(cuid())
-  shop               String   @unique
-  returnWindowDays   Int      @default(30)
-  allowExchanges     Boolean  @default(true)
-  allowStoreCredit   Boolean  @default(true)
-  allowPartialReturns Boolean @default(true)
-  refundMethod       String   @default("original") // original, store_credit
-  createdAt          DateTime @default(now())
-  updatedAt          DateTime @updatedAt
+  id                  String   @id @default(cuid())
+  shop                String   @unique
+  returnWindowDays    Int      @default(30)
+  allowExchanges      Boolean  @default(true)
+  allowStoreCredit    Boolean  @default(true)
+  allowPartialReturns Boolean  @default(true)
+  refundMethod        String   @default("original") // original, store_credit
+  restockingFeePercent Decimal? @default(0)
+  autoApproveThreshold Decimal? @default(0)
+  returnReasons       String?  @default("Wrong size,Defective,Not as described,Changed mind,Other")
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
 }
 
 model ReturnRequest {
@@ -74,6 +77,7 @@ model ReturnRequest {
   adminNote       String?
   totalRefund     Decimal?      @default(0)
   storeCreditIssued Decimal?    @default(0)
+  restockingFee   Decimal?      @default(0)
   shopifyRefundId String?
   createdAt       DateTime      @default(now())
   updatedAt       DateTime      @updatedAt

@@ -13,10 +13,12 @@ import {
   Select,
   InlineStack,
   DataTable,
+  Badge,
 } from "@shopify/polaris";
 import { useState } from "react";
 import { unauthenticated } from "../shopify.server";
-import { createReturnRequest } from "../models/returns.server";
+import { createReturnRequest, getShopSettings } from "../models/returns.server";
+import prisma from "../db.server";
 import { serializeObject } from "../lib/serializers";
 
 export const loader = async ({ request, params }: LoaderFunctionArgs) => {
@@ -25,8 +27,17 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   const orderName = url.searchParams.get("orderName") || "";
   const email = url.searchParams.get("email") || "";
 
+  const settings = await getShopSettings(shop);
+  const reasons = settings.returnReasons?.split(",").map((r) => r.trim()).filter(Boolean) || [
+    "Wrong size",
+    "Defective",
+    "Not as described",
+    "Changed mind",
+    "Other",
+  ];
+
   if (!orderName || !email) {
-    return json({ order: null, error: null });
+    return serializeObject({ settings: { reasons }, order: null, existingRequests: [], error: null });
   }
 
   try {
@@ -39,6 +50,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
             id
             name
             email
+            processedAt
             customer {
               firstName
               lastName
@@ -62,9 +74,37 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
     );
     const responseJson = await response.json();
     const order = responseJson?.data?.orders?.nodes?.[0] || null;
-    return serializeObject({ order, error: order ? null : "Order not found." });
+
+    let windowError = null;
+    if (order && order.processedAt) {
+      const processedAt = new Date(order.processedAt);
+      const windowEnd = new Date();
+      windowEnd.setDate(windowEnd.getDate() - settings.returnWindowDays);
+      if (processedAt < windowEnd) {
+        windowError = `This order is outside the ${settings.returnWindowDays}-day return window.`;
+      }
+    }
+
+    const existingRequests = order
+      ? await prisma.returnRequest.findMany({
+          where: { shop, orderId: order.id },
+          orderBy: { createdAt: "desc" },
+        })
+      : [];
+
+    return serializeObject({
+      settings: { reasons, returnWindowDays: settings.returnWindowDays },
+      order,
+      existingRequests,
+      error: windowError || (order ? null : "Order not found."),
+    });
   } catch (error) {
-    return json({ order: null, error: "Unable to load order. Please contact support." });
+    return json({
+      settings: { reasons, returnWindowDays: settings.returnWindowDays },
+      order: null,
+      existingRequests: [],
+      error: "Unable to load order. Please contact support.",
+    });
   }
 };
 
@@ -91,7 +131,10 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
     }));
 
   if (!orderId || !reason || lineItems.length === 0) {
-    return json({ success: false, error: "Please select at least one item and provide a reason." });
+    return json({
+      success: false,
+      error: "Please select at least one item and provide a reason.",
+    });
   }
 
   await createReturnRequest({
@@ -109,7 +152,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
 };
 
 export default function CustomerReturnsPortal() {
-  const { order, error } = useLoaderData<typeof loader>();
+  const { settings, order, existingRequests, error } = useLoaderData<typeof loader>();
   const [searchParams, setSearchParams] = useSearchParams();
   const [orderName, setOrderName] = useState(searchParams.get("orderName") || "");
   const [email, setEmail] = useState(searchParams.get("email") || "");
@@ -183,13 +226,38 @@ export default function CustomerReturnsPortal() {
           </BlockStack>
         </Card>
 
-        {order && (
+        {existingRequests.length > 0 && (
+          <Card>
+            <BlockStack gap="400">
+              <Text as="h2" variant="headingMd">
+                Existing requests for this order
+              </Text>
+              <DataTable
+                columnContentTypes={["text", "text", "text"]}
+                headings={["Status", "Resolution", "Date"]}
+                rows={existingRequests.map((req: any) => [
+                  <Badge key={req.id} tone={statusTone(req.status)}>
+                    {req.status}
+                  </Badge>,
+                  req.resolution,
+                  new Date(req.createdAt).toLocaleDateString(),
+                ])}
+              />
+            </BlockStack>
+          </Card>
+        )}
+
+        {order && !error && (
           <Form method="post">
             <BlockStack gap="400">
               <input type="hidden" name="orderId" value={order.id} />
               <input type="hidden" name="orderName" value={order.name} />
               <input type="hidden" name="customerEmail" value={order.email || email} />
-              <input type="hidden" name="customerName" value={`${order.customer?.firstName || ""} ${order.customer?.lastName || ""}`.trim()} />
+              <input
+                type="hidden"
+                name="customerName"
+                value={`${order.customer?.firstName || ""} ${order.customer?.lastName || ""}`.trim()}
+              />
 
               <Card>
                 <BlockStack gap="400">
@@ -229,11 +297,11 @@ export default function CustomerReturnsPortal() {
 
               <Card>
                 <BlockStack gap="400">
-                  <TextField
+                  <Select
                     label="Reason for return"
+                    options={settings.reasons.map((r: string) => ({ label: r, value: r }))}
                     value={reason}
                     onChange={setReason}
-                    autoComplete="off"
                     name="reason"
                   />
                   <Select
@@ -265,4 +333,19 @@ export default function CustomerReturnsPortal() {
       </BlockStack>
     </Page>
   );
+}
+
+function statusTone(status: string) {
+  switch (status) {
+    case "APPROVED":
+    case "COMPLETED":
+      return "success";
+    case "PENDING":
+      return "warning";
+    case "REJECTED":
+    case "CANCELLED":
+      return "critical";
+    default:
+      return undefined;
+  }
 }
