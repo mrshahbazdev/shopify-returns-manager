@@ -6,13 +6,18 @@ import type {
   StoreCredit,
   ShopSettings,
 } from "@prisma/client";
+import { generateRmaNumber } from "../lib/rma";
 
 export type ReturnRequestWithLineItems = ReturnRequest & {
   lineItems: ReturnLineItemPayload[];
+  shippingLabels?: any[];
+  notifications?: any[];
 };
 
 export type ExchangeRequestWithLineItems = ExchangeRequest & {
   lineItems: ExchangeLineItemPayload[];
+  shippingLabels?: any[];
+  notifications?: any[];
 };
 
 export interface ReturnLineItemPayload {
@@ -57,7 +62,7 @@ export async function updateShopSettings(
 export async function listReturnRequests(shop: string): Promise<ReturnRequestWithLineItems[]> {
   return prisma.returnRequest.findMany({
     where: { shop },
-    include: { lineItems: true },
+    include: { lineItems: true, shippingLabels: true, notifications: true },
     orderBy: { createdAt: "desc" },
   });
 }
@@ -68,7 +73,7 @@ export async function getReturnRequest(
 ): Promise<ReturnRequestWithLineItems | null> {
   return prisma.returnRequest.findFirst({
     where: { id, shop },
-    include: { lineItems: true },
+    include: { lineItems: true, shippingLabels: true, notifications: true },
   });
 }
 
@@ -84,9 +89,11 @@ export async function createReturnRequest(data: {
   lineItems: ReturnLineItemPayload[];
 }): Promise<ReturnRequestWithLineItems> {
   const total = data.lineItems.reduce((sum, item) => sum + item.price * item.quantity, 0);
+  const rmaNumber = generateRmaNumber(data.shop);
   return prisma.returnRequest.create({
     data: {
       ...data,
+      rmaNumber,
       totalRefund: new Prisma.Decimal(total.toFixed(2)),
       lineItems: {
         create: data.lineItems.map((item) => ({
@@ -95,7 +102,7 @@ export async function createReturnRequest(data: {
         })),
       },
     },
-    include: { lineItems: true },
+    include: { lineItems: true, shippingLabels: true, notifications: true },
   });
 }
 
@@ -107,14 +114,14 @@ export async function updateReturnRequest(
   return prisma.returnRequest.update({
     where: { id },
     data,
-    include: { lineItems: true },
+    include: { lineItems: true, shippingLabels: true, notifications: true },
   });
 }
 
 export async function listExchangeRequests(shop: string): Promise<ExchangeRequestWithLineItems[]> {
   return prisma.exchangeRequest.findMany({
     where: { shop },
-    include: { lineItems: true },
+    include: { lineItems: true, shippingLabels: true, notifications: true },
     orderBy: { createdAt: "desc" },
   });
 }
@@ -125,7 +132,7 @@ export async function getExchangeRequest(
 ): Promise<ExchangeRequestWithLineItems | null> {
   return prisma.exchangeRequest.findFirst({
     where: { id, shop },
-    include: { lineItems: true },
+    include: { lineItems: true, shippingLabels: true, notifications: true },
   });
 }
 
@@ -139,12 +146,14 @@ export async function createExchangeRequest(data: {
   customerNote?: string;
   lineItems: ExchangeLineItemPayload[];
 }): Promise<ExchangeRequestWithLineItems> {
+  const rmaNumber = generateRmaNumber(data.shop);
   return prisma.exchangeRequest.create({
     data: {
       ...data,
+      rmaNumber,
       lineItems: { create: data.lineItems },
     },
-    include: { lineItems: true },
+    include: { lineItems: true, shippingLabels: true, notifications: true },
   });
 }
 
@@ -156,7 +165,7 @@ export async function updateExchangeRequest(
   return prisma.exchangeRequest.update({
     where: { id },
     data,
-    include: { lineItems: true },
+    include: { lineItems: true, shippingLabels: true, notifications: true },
   });
 }
 

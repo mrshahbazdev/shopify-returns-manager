@@ -44,12 +44,14 @@ export default function ReturnsIndex() {
               "text",
               "text",
               "text",
+              "text",
             ]}
-            headings={["Order", "Customer", "Reason", "Resolution", "Status", "Date"]}
+            headings={["RMA", "Order", "Customer", "Reason", "Resolution", "Status", "Date"]}
             rows={returns.map((ret) => [
               <Link to={`/app/returns/${ret.id}`} key={ret.id}>
-                {ret.orderName}
+                {ret.rmaNumber}
               </Link>,
+              ret.orderName,
               ret.customerName || ret.customerEmail || "—",
               ret.reason,
               ret.resolution,

@@ -2,6 +2,7 @@ import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { useLoaderData, Form, useSearchParams } from "@remix-run/react";
 import {
+  AppProvider as PolarisAppProvider,
   Page,
   Card,
   BlockStack,
@@ -13,11 +14,18 @@ import {
   Select,
   InlineStack,
   DataTable,
+  Badge,
 } from "@shopify/polaris";
+import polarisTranslations from "@shopify/polaris/locales/en.json";
+import polarisStyles from "@shopify/polaris/build/esm/styles.css?url";
 import { useState } from "react";
 import { unauthenticated } from "../shopify.server";
-import { createReturnRequest } from "../models/returns.server";
+import { createReturnRequest, getShopSettings } from "../models/returns.server";
+import { processAutoApproval } from "../lib/returns-processor.server";
+import prisma from "../db.server";
 import { serializeObject } from "../lib/serializers";
+
+export const links = () => [{ rel: "stylesheet", href: polarisStyles }];
 
 export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   const shop = params.shop!;
@@ -25,8 +33,23 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   const orderName = url.searchParams.get("orderName") || "";
   const email = url.searchParams.get("email") || "";
 
+  const settings = await getShopSettings(shop);
+  const reasons = settings.returnReasons?.split(",").map((r) => r.trim()).filter(Boolean) || [
+    "Wrong size",
+    "Defective",
+    "Not as described",
+    "Changed mind",
+    "Other",
+  ];
+
   if (!orderName || !email) {
-    return json({ order: null, error: null });
+    return serializeObject({
+      polarisTranslations,
+      settings: { reasons, returnWindowDays: settings.returnWindowDays },
+      order: null,
+      existingRequests: [],
+      error: null,
+    });
   }
 
   try {
@@ -39,6 +62,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
             id
             name
             email
+            processedAt
             customer {
               firstName
               lastName
@@ -62,9 +86,39 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
     );
     const responseJson = await response.json();
     const order = responseJson?.data?.orders?.nodes?.[0] || null;
-    return serializeObject({ order, error: order ? null : "Order not found." });
+
+    let windowError = null;
+    if (order && order.processedAt) {
+      const processedAt = new Date(order.processedAt);
+      const windowEnd = new Date();
+      windowEnd.setDate(windowEnd.getDate() - settings.returnWindowDays);
+      if (processedAt < windowEnd) {
+        windowError = `This order is outside the ${settings.returnWindowDays}-day return window.`;
+      }
+    }
+
+    const existingRequests = order
+      ? await prisma.returnRequest.findMany({
+          where: { shop, orderId: order.id },
+          orderBy: { createdAt: "desc" },
+        })
+      : [];
+
+    return serializeObject({
+      polarisTranslations,
+      settings: { reasons, returnWindowDays: settings.returnWindowDays },
+      order,
+      existingRequests,
+      error: windowError || (order ? null : "Order not found."),
+    });
   } catch (error) {
-    return json({ order: null, error: "Unable to load order. Please contact support." });
+    return json({
+      polarisTranslations,
+      settings: { reasons, returnWindowDays: settings.returnWindowDays },
+      order: null,
+      existingRequests: [],
+      error: "Unable to load order. Please contact support.",
+    });
   }
 };
 
@@ -91,10 +145,13 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
     }));
 
   if (!orderId || !reason || lineItems.length === 0) {
-    return json({ success: false, error: "Please select at least one item and provide a reason." });
+    return json({
+      success: false,
+      error: "Please select at least one item and provide a reason.",
+    });
   }
 
-  await createReturnRequest({
+  const returnRequest = await createReturnRequest({
     shop,
     orderId,
     orderName,
@@ -105,11 +162,20 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
     lineItems,
   });
 
-  return json({ success: true, error: null });
+  const settings = await getShopSettings(shop);
+  try {
+    const { admin } = await unauthenticated.admin(shop);
+    await processAutoApproval(returnRequest, settings, admin);
+  } catch (e) {
+    // Auto-approval is best-effort; continue without blocking the customer.
+    console.error("Auto-approval failed", e);
+  }
+
+  return json({ success: true, error: null, rmaNumber: returnRequest.rmaNumber });
 };
 
 export default function CustomerReturnsPortal() {
-  const { order, error } = useLoaderData<typeof loader>();
+  const { polarisTranslations, settings, order, existingRequests, error } = useLoaderData<typeof loader>();
   const [searchParams, setSearchParams] = useSearchParams();
   const [orderName, setOrderName] = useState(searchParams.get("orderName") || "");
   const [email, setEmail] = useState(searchParams.get("email") || "");
@@ -148,121 +214,165 @@ export default function CustomerReturnsPortal() {
   };
 
   return (
-    <Page title="Returns & Exchanges">
-      <BlockStack gap="500">
-        <Text as="h1" variant="headingXl">
-          Start a return or exchange
-        </Text>
+    <PolarisAppProvider i18n={polarisTranslations}>
+      <Page title="Returns & Exchanges">
+        <BlockStack gap="500">
+          <Text as="h1" variant="headingXl">
+            Start a return or exchange
+          </Text>
 
-        {error && <Banner tone="warning">{error}</Banner>}
+          {error && <Banner tone="warning">{error}</Banner>}
 
-        <Card>
-          <BlockStack gap="400">
-            <Text as="h2" variant="headingMd">
-              Find your order
-            </Text>
-            <InlineStack gap="300" align="start" blockAlign="end">
-              <TextField
-                label="Order number"
-                value={orderName}
-                onChange={setOrderName}
-                autoComplete="off"
-                placeholder="#1001"
-              />
-              <TextField
-                label="Email"
-                value={email}
-                onChange={setEmail}
-                autoComplete="email"
-                type="email"
-              />
-              <Button onClick={lookupOrder} variant="primary">
-                Find order
-              </Button>
-            </InlineStack>
-          </BlockStack>
-        </Card>
-
-        {order && (
-          <Form method="post">
+          <Card>
             <BlockStack gap="400">
-              <input type="hidden" name="orderId" value={order.id} />
-              <input type="hidden" name="orderName" value={order.name} />
-              <input type="hidden" name="customerEmail" value={order.email || email} />
-              <input type="hidden" name="customerName" value={`${order.customer?.firstName || ""} ${order.customer?.lastName || ""}`.trim()} />
-
-              <Card>
-                <BlockStack gap="400">
-                  <Text as="h2" variant="headingMd">
-                    Select items to return
-                  </Text>
-                  <DataTable
-                    columnContentTypes={["text", "text", "text", "text"]}
-                    headings={["Select", "Product", "Qty to return", "Price"]}
-                    rows={order.lineItems.nodes.map((item: any) => [
-                      <Checkbox
-                        key={`chk-${item.id}`}
-                        label=""
-                        checked={!!selectedItems[item.id]}
-                        onChange={() => toggleItem(item)}
-                      />,
-                      `${item.title} ${item.variant?.title ? `(${item.variant.title})` : ""}`,
-                      selectedItems[item.id] ? (
-                        <TextField
-                          key={`qty-${item.id}`}
-                          label=""
-                          value={String(selectedItems[item.id].quantity)}
-                          onChange={(value) => updateQuantity(item.id, value)}
-                          autoComplete="off"
-                          type="number"
-                          min={1}
-                          max={item.quantity}
-                        />
-                      ) : (
-                        "—"
-                      ),
-                      `$${Number(item.variant?.price || 0).toFixed(2)}`,
-                    ])}
-                  />
-                </BlockStack>
-              </Card>
-
-              <Card>
-                <BlockStack gap="400">
-                  <TextField
-                    label="Reason for return"
-                    value={reason}
-                    onChange={setReason}
-                    autoComplete="off"
-                    name="reason"
-                  />
-                  <Select
-                    label="Preferred resolution"
-                    options={[
-                      { label: "Refund to original payment", value: "REFUND" },
-                      { label: "Store credit", value: "STORE_CREDIT" },
-                    ]}
-                    value={resolution}
-                    onChange={setResolution}
-                    name="resolution"
-                  />
-                  {Object.values(selectedItems).map((item: any) => (
-                    <input
-                      key={item.lineItemId}
-                      type="hidden"
-                      name="lineItems"
-                      value={JSON.stringify(item)}
-                    />
-                  ))}
-                  <Button submit variant="primary">
-                    Submit return request
-                  </Button>
-                </BlockStack>
-              </Card>
+              <Text as="h2" variant="headingMd">
+                Find your order
+              </Text>
+              <InlineStack gap="300" align="start" blockAlign="end">
+                <TextField
+                  label="Order number"
+                  value={orderName}
+                  onChange={setOrderName}
+                  autoComplete="off"
+                  placeholder="#1001"
+                />
+                <TextField
+                  label="Email"
+                  value={email}
+                  onChange={setEmail}
+                  autoComplete="email"
+                  type="email"
+                />
+                <Button onClick={lookupOrder} variant="primary">
+                  Find order
+                </Button>
+              </InlineStack>
             </BlockStack>
-          </Form>
-        )}
-      </BlockStack>
-    </Page>
+          </Card>
+
+          {existingRequests.length > 0 && (
+            <Card>
+              <BlockStack gap="400">
+                <Text as="h2" variant="headingMd">
+                  Existing requests for this order
+                </Text>
+                <DataTable
+                  columnContentTypes={["text", "text", "text", "text", "text"]}
+                  headings={["RMA", "Status", "Resolution", "Tracking", "Date"]}
+                  rows={existingRequests.map((req: any) => [
+                    req.rmaNumber,
+                    <Badge key={req.id} tone={statusTone(req.status)}>
+                      {req.status}
+                    </Badge>,
+                    req.resolution,
+                    req.trackingNumber ? `${req.carrier || ""} ${req.trackingNumber}` : "—",
+                    new Date(req.createdAt).toLocaleDateString(),
+                  ])}
+                />
+              </BlockStack>
+            </Card>
+          )}
+
+          {order && !error && (
+            <Form method="post">
+              <BlockStack gap="400">
+                <input type="hidden" name="orderId" value={order.id} />
+                <input type="hidden" name="orderName" value={order.name} />
+                <input type="hidden" name="customerEmail" value={order.email || email} />
+                <input
+                  type="hidden"
+                  name="customerName"
+                  value={`${order.customer?.firstName || ""} ${order.customer?.lastName || ""}`.trim()}
+                />
+
+                <Card>
+                  <BlockStack gap="400">
+                    <Text as="h2" variant="headingMd">
+                      Select items to return
+                    </Text>
+                    <DataTable
+                      columnContentTypes={["text", "text", "text", "text"]}
+                      headings={["Select", "Product", "Qty to return", "Price"]}
+                      rows={order.lineItems.nodes.map((item: any) => [
+                        <Checkbox
+                          key={`chk-${item.id}`}
+                          label=""
+                          checked={!!selectedItems[item.id]}
+                          onChange={() => toggleItem(item)}
+                        />,
+                        `${item.title} ${item.variant?.title ? `(${item.variant.title})` : ""}`,
+                        selectedItems[item.id] ? (
+                          <TextField
+                            key={`qty-${item.id}`}
+                            label=""
+                            value={String(selectedItems[item.id].quantity)}
+                            onChange={(value) => updateQuantity(item.id, value)}
+                            autoComplete="off"
+                            type="number"
+                            min={1}
+                            max={item.quantity}
+                          />
+                        ) : (
+                          "—"
+                        ),
+                        `$${Number(item.variant?.price || 0).toFixed(2)}`,
+                      ])}
+                    />
+                  </BlockStack>
+                </Card>
+
+                <Card>
+                  <BlockStack gap="400">
+                    <Select
+                      label="Reason for return"
+                      options={settings.reasons.map((r: string) => ({ label: r, value: r }))}
+                      value={reason}
+                      onChange={setReason}
+                      name="reason"
+                    />
+                    <Select
+                      label="Preferred resolution"
+                      options={[
+                        { label: "Refund to original payment", value: "REFUND" },
+                        { label: "Store credit", value: "STORE_CREDIT" },
+                      ]}
+                      value={resolution}
+                      onChange={setResolution}
+                      name="resolution"
+                    />
+                    {Object.values(selectedItems).map((item: any) => (
+                      <input
+                        key={item.lineItemId}
+                        type="hidden"
+                        name="lineItems"
+                        value={JSON.stringify(item)}
+                      />
+                    ))}
+                    <Button submit variant="primary">
+                      Submit return request
+                    </Button>
+                  </BlockStack>
+                </Card>
+              </BlockStack>
+            </Form>
+          )}
+        </BlockStack>
+      </Page>
+    </PolarisAppProvider>
   );
+}
+
+function statusTone(status: string) {
+  switch (status) {
+    case "APPROVED":
+    case "COMPLETED":
+      return "success";
+    case "PENDING":
+      return "warning";
+    case "REJECTED":
+    case "CANCELLED":
+      return "critical";
+    default:
+      return undefined;
+  }
 }

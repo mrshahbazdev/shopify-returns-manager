@@ -11,6 +11,7 @@ import {
   Button,
   DataTable,
   Badge,
+  ProgressBar,
 } from "@shopify/polaris";
 import { TitleBar } from "@shopify/app-bridge-react";
 import { authenticate } from "../shopify.server";
@@ -21,33 +22,71 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
   const shop = session.shop;
 
-  const [returnCount, exchangeCount, creditAggregate] = await Promise.all([
+  const [
+    returnCount,
+    exchangeCount,
+    pendingReturns,
+    completedReturns,
+    rejectedReturns,
+    creditAggregate,
+    recentReturns,
+    topReasons,
+  ] = await Promise.all([
     prisma.returnRequest.count({ where: { shop } }),
     prisma.exchangeRequest.count({ where: { shop } }),
+    prisma.returnRequest.count({ where: { shop, status: "PENDING" } }),
+    prisma.returnRequest.count({ where: { shop, status: "COMPLETED" } }),
+    prisma.returnRequest.count({ where: { shop, status: "REJECTED" } }),
     prisma.storeCredit.aggregate({
       where: { shop },
       _sum: { balance: true },
     }),
+    prisma.returnRequest.findMany({
+      where: { shop },
+      orderBy: { createdAt: "desc" },
+      take: 5,
+    }),
+    prisma.returnRequest.groupBy({
+      by: ["reason"],
+      where: { shop },
+      _count: { reason: true },
+      orderBy: { _count: { reason: "desc" } },
+      take: 5,
+    }),
   ]);
 
-  const recentReturns = await prisma.returnRequest.findMany({
-    where: { shop },
-    orderBy: { createdAt: "desc" },
-    take: 5,
+  const totalResolved = completedReturns + rejectedReturns;
+  const approvalRate = totalResolved > 0 ? (completedReturns / totalResolved) * 100 : 0;
+  const totalRefund = await prisma.returnRequest.aggregate({
+    where: { shop, status: { in: ["APPROVED", "COMPLETED"] } },
+    _sum: { totalRefund: true },
   });
 
   return serializeObject({
     shop,
     returnCount,
     exchangeCount,
+    pendingReturns,
+    completedReturns,
+    approvalRate: approvalRate.toFixed(1),
     totalStoreCredit: creditAggregate._sum.balance || 0,
+    totalRefunded: totalRefund._sum.totalRefund || 0,
     recentReturns,
+    topReasons: topReasons.map((r) => ({ reason: r.reason, count: r._count.reason })),
   });
 };
 
 export default function Index() {
-  const { returnCount, exchangeCount, totalStoreCredit, recentReturns } =
-    useLoaderData<typeof loader>();
+  const {
+    returnCount,
+    exchangeCount,
+    pendingReturns,
+    approvalRate,
+    totalStoreCredit,
+    totalRefunded,
+    recentReturns,
+    topReasons,
+  } = useLoaderData<typeof loader>();
 
   return (
     <Page>
@@ -80,6 +119,14 @@ export default function Index() {
                     </Box>
                     <Box flex="1">
                       <Text as="p" variant="heading2xl">
+                        {pendingReturns}
+                      </Text>
+                      <Text as="p" variant="bodyMd" tone="subdued">
+                        Pending review
+                      </Text>
+                    </Box>
+                    <Box flex="1">
+                      <Text as="p" variant="heading2xl">
                         ${Number(totalStoreCredit).toFixed(2)}
                       </Text>
                       <Text as="p" variant="bodyMd" tone="subdued">
@@ -89,6 +136,37 @@ export default function Index() {
                   </InlineStack>
                 </BlockStack>
               </Card>
+
+              <InlineStack gap="400" wrap={false}>
+                <Box flex="1">
+                  <Card>
+                    <BlockStack gap="200">
+                      <Text as="h2" variant="headingMd">
+                        Approval rate
+                      </Text>
+                      <Text as="p" variant="heading2xl">
+                        {approvalRate}%
+                      </Text>
+                      <ProgressBar progress={Number(approvalRate)} size="small" />
+                    </BlockStack>
+                  </Card>
+                </Box>
+                <Box flex="1">
+                  <Card>
+                    <BlockStack gap="200">
+                      <Text as="h2" variant="headingMd">
+                        Revenue retained
+                      </Text>
+                      <Text as="p" variant="heading2xl">
+                        ${Number(totalRefunded).toFixed(2)}
+                      </Text>
+                      <Text as="p" variant="bodyMd" tone="subdued">
+                        Total approved return value
+                      </Text>
+                    </BlockStack>
+                  </Card>
+                </Box>
+              </InlineStack>
 
               <Card>
                 <BlockStack gap="400">
@@ -105,7 +183,9 @@ export default function Index() {
                       <Link to={`/app/returns/${req.id}`} key={req.id}>
                         {req.orderName}
                       </Link>,
-                      <Badge key={`status-${req.id}`}>{req.status}</Badge>,
+                      <Badge key={`status-${req.id}`} tone={statusTone(req.status)}>
+                        {req.status}
+                      </Badge>,
                       req.resolution,
                       new Date(req.createdAt).toLocaleDateString(),
                     ])}
@@ -117,6 +197,19 @@ export default function Index() {
 
           <Layout.Section variant="oneThird">
             <BlockStack gap="400">
+              <Card>
+                <BlockStack gap="400">
+                  <Text as="h2" variant="headingMd">
+                    Top return reasons
+                  </Text>
+                  <DataTable
+                    columnContentTypes={["text", "numeric"]}
+                    headings={["Reason", "Count"]}
+                    rows={topReasons.map((r) => [r.reason, r.count])}
+                  />
+                </BlockStack>
+              </Card>
+
               <Card>
                 <BlockStack gap="200">
                   <Text as="h2" variant="headingMd">
@@ -147,4 +240,19 @@ export default function Index() {
       </BlockStack>
     </Page>
   );
+}
+
+function statusTone(status: string) {
+  switch (status) {
+    case "APPROVED":
+    case "COMPLETED":
+      return "success";
+    case "PENDING":
+      return "warning";
+    case "REJECTED":
+    case "CANCELLED":
+      return "critical";
+    default:
+      return undefined;
+  }
 }

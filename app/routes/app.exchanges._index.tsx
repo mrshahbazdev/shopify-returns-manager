@@ -35,12 +35,13 @@ export default function ExchangesIndex() {
           </EmptyState>
         ) : (
           <DataTable
-            columnContentTypes={["text", "text", "text", "text", "text"]}
-            headings={["Order", "Customer", "Reason", "Status", "Date"]}
+            columnContentTypes={["text", "text", "text", "text", "text", "text"]}
+            headings={["RMA", "Order", "Customer", "Reason", "Status", "Date"]}
             rows={exchanges.map((ex) => [
               <Link to={`/app/exchanges/${ex.id}`} key={ex.id}>
-                {ex.orderName}
+                {ex.rmaNumber}
               </Link>,
+              ex.orderName,
               ex.customerName || ex.customerEmail || "—",
               ex.reason,
               <Badge key={`status-${ex.id}`} tone={statusTone(ex.status)}>
