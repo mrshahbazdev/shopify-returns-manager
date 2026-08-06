@@ -99,6 +99,8 @@ export async function sendNotification(options: NotifyOptions) {
     return { success: false, error: "No recipient" };
   }
 
+  const settings = await prisma.shopSettings.findUnique({ where: { shop } });
+
   const template = await getNotificationTemplate(shop, event, channel);
   const body = interpolateTemplate(template.body, data);
   const subject = template.subject ? interpolateTemplate(template.subject, data) : undefined;
@@ -120,9 +122,9 @@ export async function sendNotification(options: NotifyOptions) {
   let result: { success: boolean; error?: string } = { success: false, error: "No provider configured" };
 
   if (channel === "EMAIL") {
-    result = await sendEmail(to, subject || event, body);
+    result = await sendEmail(to, subject || event, body, settings);
   } else if (channel === "SMS") {
-    result = await sendSms(to, body);
+    result = await sendSms(to, body, settings);
   }
 
   await prisma.notificationLog.update({
@@ -137,21 +139,26 @@ export async function sendNotification(options: NotifyOptions) {
   return result;
 }
 
-async function sendEmail(to: string, subject: string, html: string): Promise<{ success: boolean; error?: string }> {
-  if (process.env.RESEND_API_KEY) {
+async function sendEmail(
+  to: string,
+  subject: string,
+  html: string,
+  settings: any,
+): Promise<{ success: boolean; error?: string }> {
+  const from = settings?.emailFrom || process.env.EMAIL_FROM || "noreply@example.com";
+
+  const resendKey = settings?.resendApiKey || process.env.RESEND_API_KEY;
+  const sendgridKey = settings?.sendgridApiKey || process.env.SENDGRID_API_KEY;
+
+  if (resendKey) {
     try {
       const response = await fetch("https://api.resend.com/emails", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${process.env.RESEND_API_KEY}`,
+          Authorization: `Bearer ${resendKey}`,
         },
-        body: JSON.stringify({
-          from: process.env.EMAIL_FROM || "noreply@example.com",
-          to,
-          subject,
-          html,
-        }),
+        body: JSON.stringify({ from, to, subject, html }),
       });
       if (response.ok) {
         return { success: true };
@@ -163,17 +170,17 @@ async function sendEmail(to: string, subject: string, html: string): Promise<{ s
     }
   }
 
-  if (process.env.SENDGRID_API_KEY) {
+  if (sendgridKey) {
     try {
       const response = await fetch("https://api.sendgrid.com/v3/mail/send", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${process.env.SENDGRID_API_KEY}`,
+          Authorization: `Bearer ${sendgridKey}`,
         },
         body: JSON.stringify({
           personalizations: [{ to: [{ email: to }] }],
-          from: { email: process.env.EMAIL_FROM || "noreply@example.com" },
+          from: { email: from },
           subject,
           content: [{ type: "text/html", value: html }],
         }),
@@ -191,10 +198,14 @@ async function sendEmail(to: string, subject: string, html: string): Promise<{ s
   return { success: false, error: "No email provider configured" };
 }
 
-async function sendSms(to: string, body: string): Promise<{ success: boolean; error?: string }> {
-  const accountSid = process.env.TWILIO_ACCOUNT_SID;
-  const authToken = process.env.TWILIO_AUTH_TOKEN;
-  const from = process.env.TWILIO_PHONE_NUMBER;
+async function sendSms(
+  to: string,
+  body: string,
+  settings: any,
+): Promise<{ success: boolean; error?: string }> {
+  const accountSid = settings?.twilioAccountSid || process.env.TWILIO_ACCOUNT_SID;
+  const authToken = settings?.twilioAuthToken || process.env.TWILIO_AUTH_TOKEN;
+  const from = settings?.twilioPhoneNumber || process.env.TWILIO_PHONE_NUMBER;
 
   if (accountSid && authToken && from) {
     try {

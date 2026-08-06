@@ -41,9 +41,16 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const returnReasons = formData.get("returnReasons") as string;
   const emailProvider = formData.get("emailProvider") as string;
   const emailFrom = formData.get("emailFrom") as string;
+  const resendApiKey = formData.get("resendApiKey") as string;
+  const sendgridApiKey = formData.get("sendgridApiKey") as string;
   const smsProvider = formData.get("smsProvider") as string;
   const smsFrom = formData.get("smsFrom") as string;
+  const twilioAccountSid = formData.get("twilioAccountSid") as string;
+  const twilioAuthToken = formData.get("twilioAuthToken") as string;
+  const twilioPhoneNumber = formData.get("twilioPhoneNumber") as string;
   const shippingLabelProvider = formData.get("shippingLabelProvider") as string;
+  const shippoApiKey = formData.get("shippoApiKey") as string;
+  const easypostApiKey = formData.get("easypostApiKey") as string;
 
   const settings = await updateShopSettings(session.shop, {
     returnWindowDays,
@@ -58,9 +65,16 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     returnReasons,
     emailProvider,
     emailFrom,
+    resendApiKey,
+    sendgridApiKey,
     smsProvider,
     smsFrom,
+    twilioAccountSid,
+    twilioAuthToken,
+    twilioPhoneNumber,
     shippingLabelProvider,
+    shippoApiKey,
+    easypostApiKey,
   });
 
   return json({ settings: serializeObject(settings) });
@@ -82,9 +96,16 @@ export default function SettingsPage() {
   const [returnReasons, setReturnReasons] = useState(settings.returnReasons || "");
   const [emailProvider, setEmailProvider] = useState(settings.emailProvider || "none");
   const [emailFrom, setEmailFrom] = useState(settings.emailFrom || "");
+  const [resendApiKey, setResendApiKey] = useState(settings.resendApiKey || "");
+  const [sendgridApiKey, setSendgridApiKey] = useState(settings.sendgridApiKey || "");
   const [smsProvider, setSmsProvider] = useState(settings.smsProvider || "none");
   const [smsFrom, setSmsFrom] = useState(settings.smsFrom || "");
+  const [twilioAccountSid, setTwilioAccountSid] = useState(settings.twilioAccountSid || "");
+  const [twilioAuthToken, setTwilioAuthToken] = useState(settings.twilioAuthToken || "");
+  const [twilioPhoneNumber, setTwilioPhoneNumber] = useState(settings.twilioPhoneNumber || "");
   const [shippingLabelProvider, setShippingLabelProvider] = useState(settings.shippingLabelProvider || "none");
+  const [shippoApiKey, setShippoApiKey] = useState(settings.shippoApiKey || "");
+  const [easypostApiKey, setEasypostApiKey] = useState(settings.easypostApiKey || "");
 
   const handleSave = useCallback(() => {
     submit(
@@ -101,9 +122,16 @@ export default function SettingsPage() {
         returnReasons,
         emailProvider,
         emailFrom,
+        resendApiKey,
+        sendgridApiKey,
         smsProvider,
         smsFrom,
+        twilioAccountSid,
+        twilioAuthToken,
+        twilioPhoneNumber,
         shippingLabelProvider,
+        shippoApiKey,
+        easypostApiKey,
       },
       { method: "POST" },
     );
@@ -120,9 +148,16 @@ export default function SettingsPage() {
     returnReasons,
     emailProvider,
     emailFrom,
+    resendApiKey,
+    sendgridApiKey,
     smsProvider,
     smsFrom,
+    twilioAccountSid,
+    twilioAuthToken,
+    twilioPhoneNumber,
     shippingLabelProvider,
+    shippoApiKey,
+    easypostApiKey,
     submit,
   ]);
 
@@ -231,7 +266,7 @@ export default function SettingsPage() {
               options={providerOptions.filter((p) => ["none", "resend", "sendgrid"].includes(p.value))}
               value={emailProvider}
               onChange={setEmailProvider}
-              helpText="Resend or SendGrid API key must be set in environment variables."
+              helpText="API keys can be entered below; they are stored per shop."
             />
             <TextField
               label="From email"
@@ -240,12 +275,26 @@ export default function SettingsPage() {
               autoComplete="off"
               helpText="Sender address used for customer emails."
             />
+            <TextField
+              label="Resend API key"
+              value={resendApiKey}
+              onChange={setResendApiKey}
+              autoComplete="off"
+              type="password"
+            />
+            <TextField
+              label="SendGrid API key"
+              value={sendgridApiKey}
+              onChange={setSendgridApiKey}
+              autoComplete="off"
+              type="password"
+            />
             <Select
               label="SMS provider"
               options={providerOptions.filter((p) => ["none", "twilio"].includes(p.value))}
               value={smsProvider}
               onChange={setSmsProvider}
-              helpText="Twilio credentials must be set in environment variables."
+              helpText="Twilio credentials can be entered below."
             />
             <TextField
               label="From phone number"
@@ -254,12 +303,45 @@ export default function SettingsPage() {
               autoComplete="off"
               helpText="Twilio phone number for SMS."
             />
+            <TextField
+              label="Twilio Account SID"
+              value={twilioAccountSid}
+              onChange={setTwilioAccountSid}
+              autoComplete="off"
+            />
+            <TextField
+              label="Twilio Auth Token"
+              value={twilioAuthToken}
+              onChange={setTwilioAuthToken}
+              autoComplete="off"
+              type="password"
+            />
+            <TextField
+              label="Twilio phone number"
+              value={twilioPhoneNumber}
+              onChange={setTwilioPhoneNumber}
+              autoComplete="off"
+            />
             <Select
               label="Shipping label provider"
               options={providerOptions.filter((p) => ["none", "shippo", "easypost"].includes(p.value))}
               value={shippingLabelProvider}
               onChange={setShippingLabelProvider}
-              helpText="Shippo or EasyPost API key must be set in environment variables."
+              helpText="API keys can be entered below."
+            />
+            <TextField
+              label="Shippo API key"
+              value={shippoApiKey}
+              onChange={setShippoApiKey}
+              autoComplete="off"
+              type="password"
+            />
+            <TextField
+              label="EasyPost API key"
+              value={easypostApiKey}
+              onChange={setEasypostApiKey}
+              autoComplete="off"
+              type="password"
             />
             <InlineStack align="end">
               <Button onClick={handleSave} variant="primary">

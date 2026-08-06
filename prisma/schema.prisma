@@ -81,9 +81,16 @@ model ShopSettings {
   returnReasons       String?  @default("Wrong size,Defective,Not as described,Changed mind,Other")
   emailProvider       String?  @default("none") // resend, sendgrid, none
   emailFrom           String?
+  resendApiKey        String?
+  sendgridApiKey      String?
   smsProvider         String?  @default("none") // twilio, none
   smsFrom             String?
+  twilioAccountSid    String?
+  twilioAuthToken     String?
+  twilioPhoneNumber   String?
   shippingLabelProvider String? @default("none") // shippo, easypost, none
+  shippoApiKey        String?
+  easypostApiKey      String?
   createdAt           DateTime @default(now())
   updatedAt           DateTime @updatedAt
 }

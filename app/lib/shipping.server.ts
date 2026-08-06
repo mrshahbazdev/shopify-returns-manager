@@ -16,8 +16,8 @@ export async function createShippingLabel(
   const reference = request.rmaNumber || request.id;
 
   if (provider === "shippo") {
-    const apiKey = process.env.SHIPPO_API_KEY;
-    if (!apiKey) return { success: false, error: "Missing SHIPPO_API_KEY" };
+    const apiKey = settings?.shippoApiKey || process.env.SHIPPO_API_KEY;
+    if (!apiKey) return { success: false, error: "Missing Shippo API key" };
 
     try {
       // Shippo requires a rate object to purchase a transaction. Without full
@@ -61,8 +61,8 @@ export async function createShippingLabel(
   }
 
   if (provider === "easypost") {
-    const apiKey = process.env.EASYPOST_API_KEY;
-    if (!apiKey) return { success: false, error: "Missing EASYPOST_API_KEY" };
+    const apiKey = settings?.easypostApiKey || process.env.EASYPOST_API_KEY;
+    if (!apiKey) return { success: false, error: "Missing EasyPost API key" };
 
     try {
       const response = await fetch("https://api.easypost.com/v2/shipments", {
