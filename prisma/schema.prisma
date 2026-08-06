@@ -48,6 +48,24 @@ enum Resolution {
   REPAIR
 }
 
+enum RefundStatus {
+  PENDING
+  ISSUED
+  FAILED
+  SKIPPED
+}
+
+enum NotificationChannel {
+  EMAIL
+  SMS
+}
+
+enum NotificationStatus {
+  PENDING
+  SENT
+  FAILED
+}
+
 model ShopSettings {
   id                  String   @id @default(cuid())
   shop                String   @unique
@@ -58,7 +76,14 @@ model ShopSettings {
   refundMethod        String   @default("original") // original, store_credit
   restockingFeePercent Decimal? @default(0)
   autoApproveThreshold Decimal? @default(0)
+  autoApproveEnabled  Boolean  @default(false)
+  autoRejectReasons   String?  // comma-separated
   returnReasons       String?  @default("Wrong size,Defective,Not as described,Changed mind,Other")
+  emailProvider       String?  @default("none") // resend, sendgrid, none
+  emailFrom           String?
+  smsProvider         String?  @default("none") // twilio, none
+  smsFrom             String?
+  shippingLabelProvider String? @default("none") // shippo, easypost, none
   createdAt           DateTime @default(now())
   updatedAt           DateTime @updatedAt
 }
@@ -66,6 +91,7 @@ model ShopSettings {
 model ReturnRequest {
   id              String        @id @default(cuid())
   shop            String
+  rmaNumber       String        @default(cuid())
   orderId         String
   orderName       String
   customerEmail   String?
@@ -78,10 +104,21 @@ model ReturnRequest {
   totalRefund     Decimal?      @default(0)
   storeCreditIssued Decimal?    @default(0)
   restockingFee   Decimal?      @default(0)
+  refundStatus    RefundStatus  @default(PENDING)
   shopifyRefundId String?
+  refundError     String?
+  exchangeOrderId String?
+  trackingNumber  String?
+  carrier         String?
+  shipDate        DateTime?
+  receivedDate    DateTime?
   createdAt       DateTime      @default(now())
   updatedAt       DateTime      @updatedAt
   lineItems       ReturnLineItem[]
+  shippingLabels  ShippingLabel[]
+  notifications   NotificationLog[]
+
+  @@unique([shop, rmaNumber])
 }
 
 model ReturnLineItem {
@@ -101,6 +138,7 @@ model ReturnLineItem {
 model ExchangeRequest {
   id              String        @id @default(cuid())
   shop            String
+  rmaNumber       String        @default(cuid())
   orderId         String
   orderName       String
   customerEmail   String?
@@ -109,9 +147,18 @@ model ExchangeRequest {
   reason          String
   customerNote    String?
   adminNote       String?
+  exchangeOrderId String?
+  trackingNumber  String?
+  carrier         String?
+  shipDate        DateTime?
+  receivedDate    DateTime?
   createdAt       DateTime      @default(now())
   updatedAt       DateTime      @updatedAt
   lineItems       ExchangeLineItem[]
+  shippingLabels  ShippingLabel[]
+  notifications   NotificationLog[]
+
+  @@unique([shop, rmaNumber])
 }
 
 model ExchangeLineItem {
@@ -149,4 +196,51 @@ model StoreCreditTransaction {
   description   String?
   returnRequestId String?
   createdAt     DateTime    @default(now())
+}
+
+model ShippingLabel {
+  id              String   @id @default(cuid())
+  returnRequestId String?
+  returnRequest   ReturnRequest? @relation(fields: [returnRequestId], references: [id], onDelete: Cascade)
+  exchangeRequestId String?
+  exchangeRequest   ExchangeRequest? @relation(fields: [exchangeRequestId], references: [id], onDelete: Cascade)
+  carrier         String
+  service         String?
+  trackingNumber  String
+  labelUrl        String?
+  cost            Decimal?
+  status          String   @default("created") // created, purchased, failed
+  createdAt       DateTime @default(now())
+}
+
+model NotificationLog {
+  id              String           @id @default(cuid())
+  shop            String
+  channel         NotificationChannel
+  to              String
+  subject         String?
+  body            String?
+  status          NotificationStatus @default(PENDING)
+  error           String?
+  event           String
+  returnRequestId String?
+  returnRequest   ReturnRequest? @relation(fields: [returnRequestId], references: [id], onDelete: Cascade)
+  exchangeRequestId String?
+  exchangeRequest   ExchangeRequest? @relation(fields: [exchangeRequestId], references: [id], onDelete: Cascade)
+  createdAt       DateTime         @default(now())
+  sentAt          DateTime?
+}
+
+model NotificationTemplate {
+  id      String @id @default(cuid())
+  shop    String
+  event   String // return_created, return_approved, return_rejected, return_shipped, return_received, exchange_created, exchange_approved
+  channel NotificationChannel
+  subject String?
+  body    String
+  active  Boolean @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([shop, event, channel])
 }

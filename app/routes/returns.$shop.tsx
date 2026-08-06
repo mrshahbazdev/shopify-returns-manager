@@ -21,6 +21,7 @@ import polarisStyles from "@shopify/polaris/build/esm/styles.css?url";
 import { useState } from "react";
 import { unauthenticated } from "../shopify.server";
 import { createReturnRequest, getShopSettings } from "../models/returns.server";
+import { processAutoApproval } from "../lib/returns-processor.server";
 import prisma from "../db.server";
 import { serializeObject } from "../lib/serializers";
 
@@ -150,7 +151,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
     });
   }
 
-  await createReturnRequest({
+  const returnRequest = await createReturnRequest({
     shop,
     orderId,
     orderName,
@@ -161,7 +162,16 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
     lineItems,
   });
 
-  return json({ success: true, error: null });
+  const settings = await getShopSettings(shop);
+  try {
+    const { admin } = await unauthenticated.admin(shop);
+    await processAutoApproval(returnRequest, settings, admin);
+  } catch (e) {
+    // Auto-approval is best-effort; continue without blocking the customer.
+    console.error("Auto-approval failed", e);
+  }
+
+  return json({ success: true, error: null, rmaNumber: returnRequest.rmaNumber });
 };
 
 export default function CustomerReturnsPortal() {
@@ -247,13 +257,15 @@ export default function CustomerReturnsPortal() {
                   Existing requests for this order
                 </Text>
                 <DataTable
-                  columnContentTypes={["text", "text", "text"]}
-                  headings={["Status", "Resolution", "Date"]}
+                  columnContentTypes={["text", "text", "text", "text", "text"]}
+                  headings={["RMA", "Status", "Resolution", "Tracking", "Date"]}
                   rows={existingRequests.map((req: any) => [
+                    req.rmaNumber,
                     <Badge key={req.id} tone={statusTone(req.status)}>
                       {req.status}
                     </Badge>,
                     req.resolution,
+                    req.trackingNumber ? `${req.carrier || ""} ${req.trackingNumber}` : "—",
                     new Date(req.createdAt).toLocaleDateString(),
                   ])}
                 />
